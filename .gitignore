@@ -29,3 +29,9 @@ gophish_admin.key
 *.exe
 gophish.db*
 gophish
+
+.idea
+
+config.json
+example.crt
+example.key

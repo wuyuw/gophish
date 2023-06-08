@@ -392,7 +392,8 @@ func (as *AdminServer) Login(w http.ResponseWriter, r *http.Request) {
 			as.handleInvalidLogin(w, r, "Account Locked")
 			return
 		}
-		u.LastLogin = time.Now().UTC()
+		now := time.Now().UTC()
+		u.LastLogin = &now
 		err = models.PutUser(&u)
 		if err != nil {
 			log.Error(err)
