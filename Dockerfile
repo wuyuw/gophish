@@ -5,6 +5,10 @@ USER root
 
 RUN mkdir /opt/gophish
 
+# 为我们的镜像设置必要的环境变量
+ENV GOPROXY=https://goproxy.cn,direct \
+  GO111MODULE=on 
+
 # RUN useradd -m -d /opt/gophish -s /bin/bash app
 
 #RUN apt-get update && \
@@ -19,7 +23,7 @@ COPY . /opt/gophish
 # RUN chown app. config.template.json
 RUN mv config.template.json config.json
 
-RUN go build -v .
+RUN go mod tidy && go build -v .
 
 RUN #setcap 'cap_net_bind_service=+ep' /opt/gophish/gophish
 
