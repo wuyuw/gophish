@@ -235,8 +235,8 @@ func (m *MailLog) Generate(msg *gomail.Message) error {
 	if subject != "" {
 		msg.SetHeader("Subject", subject)
 	}
-	msg.SetHeader("To", r.Email)
-	//msg.SetHeader("To", r.FormatAddress())
+	//msg.SetHeader("To", r.Email)
+	msg.SetHeader("To", r.FormatAddress())
 	if c.Template.Text != "" {
 		text, err := ExecuteTemplate(c.Template.Text, ptx)
 		if err != nil {
