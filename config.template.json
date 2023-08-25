@@ -15,6 +15,7 @@
 	"mail": {
 		"batch_size": 10,
 		"batch_wait": 5,
+		"min_size": 10,
 		"user_sender": false,
 		"senders": [
 			{

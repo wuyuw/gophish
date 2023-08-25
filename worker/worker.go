@@ -45,6 +45,9 @@ func New(options ...func(Worker) error) (Worker, error) {
 	if w.config.BatchSize > 0 {
 		w.mailer.SetBatchSize(w.config.BatchWait)
 	}
+	if w.config.MinSize > 0 {
+		w.mailer.SetMinSize(w.config.MinSize)
+	}
 	if w.config.BatchWait > 0 {
 		w.mailer.SetBatchWait(time.Second * time.Duration(w.config.BatchWait))
 	}
@@ -77,6 +80,9 @@ func (w *DefaultWorker) SetConfig(conf config.Mail) {
 	}
 	if w.config.BatchWait > 0 {
 		w.mailer.SetBatchWait(time.Second * time.Duration(w.config.BatchWait))
+	}
+	if w.config.MinSize > 0 {
+		w.mailer.SetMinSize(w.config.MinSize)
 	}
 }
 

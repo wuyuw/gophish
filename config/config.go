@@ -18,6 +18,7 @@ type Mail struct {
 	UseSender bool     `json:"user_sender"`
 	BatchSize int      `json:"batch_size"`
 	BatchWait int      `json:"batch_wait"`
+	MinSize   int      `json:"min_size"`
 }
 
 // AdminServer represents the Admin server configuration details

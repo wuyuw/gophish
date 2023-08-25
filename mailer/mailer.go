@@ -39,6 +39,7 @@ type Mailer interface {
 	Queue([]Mail)
 	SetSender([]config.Sender)
 	SetBatchSize(int)
+	SetMinSize(int)
 	SetBatchWait(time.Duration)
 }
 
@@ -81,6 +82,7 @@ type MailWorker struct {
 	queue      chan []Mail
 	senders    []config.Sender
 	batchSize  int
+	minSize    int
 	batchWait  time.Duration
 	smtpHelper SMTPHelper
 }
@@ -111,6 +113,12 @@ func WithBatchSize(size int) MailOption {
 	}
 }
 
+func WithMinSize(num int) MailOption {
+	return func(w *MailWorker) {
+		w.minSize = num
+	}
+}
+
 func WithBatchWait(wait time.Duration) MailOption {
 	return func(w *MailWorker) {
 		w.batchWait = wait
@@ -129,6 +137,10 @@ func (mw *MailWorker) SetSender(sender []config.Sender) {
 
 func (mw *MailWorker) SetBatchSize(size int) {
 	mw.batchSize = size
+}
+
+func (mw *MailWorker) SetMinSize(num int) {
+	mw.minSize = num
 }
 
 func (mw *MailWorker) SetBatchWait(wait time.Duration) {
@@ -171,9 +183,7 @@ func (mw *MailWorker) Start(ctx context.Context) {
 			}
 			if len(dialerArr) > 0 {
 				// 开启配置：使用配置中提供的所有邮箱分组发送
-				go func(ctx context.Context, ms []Mail) {
-					mw.sendMailMultiSender(ctx, dialerArr, ms)
-				}(ctx, ms)
+				mw.sendMailMultiSender(ctx, dialerArr, ms)
 			} else {
 				// 原逻辑：一次演练任务使用配置的一个邮箱发送
 				go func(ctx context.Context, ms []Mail) {
@@ -276,7 +286,7 @@ func splitMail(ms []Mail, n int, min int) [][]Mail {
 
 // 使用多个邮箱进行分组发送
 func (mw *MailWorker) sendMailMultiSender(ctx context.Context, senders []SMTPEntry, ms []Mail) {
-	mailGroup := splitMail(ms, len(senders), 10)
+	mailGroup := splitMail(ms, len(senders), mw.minSize)
 	for i, _ := range mailGroup {
 		go mw.sendMail(ctx, senders[i].dialer, senders[i].from, mailGroup[i])
 	}
