@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/gophish/gophish/config"
+
 	log "github.com/gophish/gophish/logger"
 	"github.com/gophish/gophish/mailer"
 	"github.com/gophish/gophish/models"
@@ -15,16 +17,20 @@ type Worker interface {
 	Start()
 	LaunchCampaign(c models.Campaign)
 	SendTestEmail(s *models.EmailRequest) error
+	SetConfig(mail config.Mail)
 }
 
 // DefaultWorker is the background worker that handles watching for new campaigns and sending emails appropriately.
 type DefaultWorker struct {
 	mailer mailer.Mailer
+	config config.Mail
 }
 
 // New creates a new worker object to handle the creation of campaigns
 func New(options ...func(Worker) error) (Worker, error) {
-	defaultMailer := mailer.NewMailWorker()
+	smtpHelper := models.NewSMTPHelper()
+	defaultMailer := mailer.NewMailWorker(
+		mailer.WithSTMPHelper(smtpHelper))
 	w := &DefaultWorker{
 		mailer: defaultMailer,
 	}
@@ -33,7 +39,26 @@ func New(options ...func(Worker) error) (Worker, error) {
 			return nil, err
 		}
 	}
+	if w.config.UseSender {
+		w.mailer.SetSender(w.config.Senders)
+	}
+	if w.config.BatchSize > 0 {
+		w.mailer.SetBatchSize(w.config.BatchWait)
+	}
+	if w.config.MinSize > 0 {
+		w.mailer.SetMinSize(w.config.MinSize)
+	}
+	if w.config.BatchWait > 0 {
+		w.mailer.SetBatchWait(time.Second * time.Duration(w.config.BatchWait))
+	}
 	return w, nil
+}
+
+func WithConfig(config config.Mail) func(worker *DefaultWorker) error {
+	return func(w *DefaultWorker) error {
+		w.config = config
+		return nil
+	}
 }
 
 // WithMailer sets the mailer for a given worker.
@@ -42,6 +67,22 @@ func WithMailer(m mailer.Mailer) func(*DefaultWorker) error {
 	return func(w *DefaultWorker) error {
 		w.mailer = m
 		return nil
+	}
+}
+
+func (w *DefaultWorker) SetConfig(conf config.Mail) {
+	w.config = conf
+	if w.config.UseSender {
+		w.mailer.SetSender(w.config.Senders)
+	}
+	if w.config.BatchSize > 0 {
+		w.mailer.SetBatchSize(w.config.BatchWait)
+	}
+	if w.config.BatchWait > 0 {
+		w.mailer.SetBatchWait(time.Second * time.Duration(w.config.BatchWait))
+	}
+	if w.config.MinSize > 0 {
+		w.mailer.SetMinSize(w.config.MinSize)
 	}
 }
 

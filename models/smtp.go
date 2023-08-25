@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gophish/gomail"
+	"github.com/gophish/gophish/config"
 	"github.com/gophish/gophish/dialer"
+
+	"github.com/gophish/gomail"
 	log "github.com/gophish/gophish/logger"
 	"github.com/gophish/gophish/mailer"
 	"github.com/jinzhu/gorm"
@@ -28,6 +30,48 @@ type Dialer struct {
 // Dial wraps the gomail dialer's Dial command
 func (d *Dialer) Dial() (mailer.Sender, error) {
 	return d.Dialer.Dial()
+}
+
+type SMTPHelper struct{}
+
+func NewSMTPHelper() *SMTPHelper {
+	return &SMTPHelper{}
+}
+
+func (h *SMTPHelper) GetDialerBySender(sender config.Sender) (mailer.Dialer, error) {
+	// Setup the message and dial
+	hp := strings.Split(sender.Host, ":")
+	if len(hp) < 2 {
+		hp = append(hp, "25")
+	}
+	host := hp[0]
+	// Any issues should have been caught in validation, but we'll
+	// double check here.
+	port, err := strconv.Atoi(hp[1])
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
+	netDialer := dialer.Dialer()
+	d := gomail.NewWithDialer(netDialer, host, port, sender.Username, sender.Password)
+	d.TLSConfig = &tls.Config{
+		ServerName:         host,
+		InsecureSkipVerify: true,
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Error(err)
+		hostname = "localhost"
+	}
+	d.LocalName = hostname
+	return &Dialer{d}, err
+}
+
+func (h *SMTPHelper) GetSmtpFrom(sender config.Sender) (string, error) {
+	if sender.Username == "" {
+		return "", errors.New("username is empty")
+	}
+	return sender.Username, nil
 }
 
 // SMTP contains the attributes needed to handle the sending of campaign emails

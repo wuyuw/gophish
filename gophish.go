@@ -113,6 +113,7 @@ func main() {
 	if *disableMailer {
 		adminOptions = append(adminOptions, controllers.WithWorker(nil))
 	}
+	adminOptions = append(adminOptions, controllers.WithMailConfig(conf.MailConf))
 	adminConfig := conf.AdminConf
 	adminServer := controllers.NewAdminServer(adminConfig, adminOptions...)
 	middleware.Store.Options.Secure = adminConfig.UseTLS

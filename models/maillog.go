@@ -72,8 +72,8 @@ func (m *MailLog) Backoff(reason error) error {
 	// Add an error, since we had to backoff because of a
 	// temporary error of some sort during the SMTP transaction
 	m.SendAttempt++
-	backoffDuration := math.Pow(2, float64(m.SendAttempt))
-	m.SendDate = m.SendDate.Add(time.Minute * time.Duration(backoffDuration))
+	// backoffDuration := math.Pow(2, float64(m.SendAttempt))
+	m.SendDate = m.SendDate.Add(time.Minute * 1)
 	err = db.Save(m).Error
 	if err != nil {
 		return err
@@ -235,7 +235,7 @@ func (m *MailLog) Generate(msg *gomail.Message) error {
 	if subject != "" {
 		msg.SetHeader("Subject", subject)
 	}
-
+	//msg.SetHeader("To", r.Email)
 	msg.SetHeader("To", r.FormatAddress())
 	if c.Template.Text != "" {
 		text, err := ExecuteTemplate(c.Template.Text, ptx)
