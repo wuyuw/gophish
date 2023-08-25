@@ -7,6 +7,19 @@ import (
 	log "github.com/gophish/gophish/logger"
 )
 
+type Sender struct {
+	Host     string `json:"host"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type Mail struct {
+	Senders   []Sender `json:"senders"`
+	UseSender bool     `json:"user_sender"`
+	BatchSize int      `json:"batch_size"`
+	BatchWait int      `json:"batch_wait"`
+}
+
 // AdminServer represents the Admin server configuration details
 type AdminServer struct {
 	ListenURL            string   `json:"listen_url"`
@@ -30,6 +43,7 @@ type PhishServer struct {
 type Config struct {
 	AdminConf      AdminServer `json:"admin_server"`
 	PhishConf      PhishServer `json:"phish_server"`
+	MailConf       Mail        `json:"mail"`
 	DBName         string      `json:"db_name"`
 	DBPath         string      `json:"db_path"`
 	DBSSLCaPath    string      `json:"db_sslca_path"`

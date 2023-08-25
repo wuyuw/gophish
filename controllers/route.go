@@ -35,10 +35,11 @@ type AdminServerOption func(*AdminServer)
 // AdminServer is an HTTP server that implements the administrative Gophish
 // handlers, including the dashboard and REST API.
 type AdminServer struct {
-	server  *http.Server
-	worker  worker.Worker
-	config  config.AdminServer
-	limiter *ratelimit.PostLimiter
+	server     *http.Server
+	worker     worker.Worker
+	config     config.AdminServer
+	mailConfig config.Mail
+	limiter    *ratelimit.PostLimiter
 }
 
 var defaultTLSConfig = &tls.Config{
@@ -69,6 +70,12 @@ func WithWorker(w worker.Worker) AdminServerOption {
 	}
 }
 
+func WithMailConfig(config config.Mail) AdminServerOption {
+	return func(as *AdminServer) {
+		as.mailConfig = config
+	}
+}
+
 // NewAdminServer returns a new instance of the AdminServer with the
 // provided config and options applied.
 func NewAdminServer(config config.AdminServer, options ...AdminServerOption) *AdminServer {
@@ -87,6 +94,7 @@ func NewAdminServer(config config.AdminServer, options ...AdminServerOption) *Ad
 	for _, opt := range options {
 		opt(as)
 	}
+	as.worker.SetConfig(as.mailConfig)
 	as.registerRoutes()
 	return as
 }

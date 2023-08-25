@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/textproto"
+	"time"
+
+	"github.com/gophish/gophish/config"
 
 	"github.com/gophish/gomail"
 	log "github.com/gophish/gophish/logger"
@@ -34,6 +37,9 @@ func (e *ErrMaxConnectAttempts) Error() string {
 type Mailer interface {
 	Start(ctx context.Context)
 	Queue([]Mail)
+	SetSender([]config.Sender)
+	SetBatchSize(int)
+	SetBatchWait(time.Duration)
 }
 
 // Sender exposes the common operations required for sending email.
@@ -58,19 +64,79 @@ type Mail interface {
 	GetSmtpFrom() (string, error)
 }
 
+type SMTPHelper interface {
+	GetDialerBySender(sender config.Sender) (Dialer, error)
+	GetSmtpFrom(sender config.Sender) (string, error)
+}
+
+type SMTPEntry struct {
+	dialer Dialer
+	from   string
+}
+
 // MailWorker is the worker that receives slices of emails
 // on a channel to send. It's assumed that every slice of emails received is meant
 // to be sent to the same server.
 type MailWorker struct {
-	queue chan []Mail
+	queue      chan []Mail
+	senders    []config.Sender
+	batchSize  int
+	batchWait  time.Duration
+	smtpHelper SMTPHelper
 }
+
+type MailOption func(worker *MailWorker)
 
 // NewMailWorker returns an instance of MailWorker with the mail queue
 // initialized.
-func NewMailWorker() *MailWorker {
-	return &MailWorker{
+func NewMailWorker(opts ...MailOption) *MailWorker {
+	w := &MailWorker{
 		queue: make(chan []Mail),
 	}
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w
+}
+
+func WithSender(senders []config.Sender) MailOption {
+	return func(w *MailWorker) {
+		w.senders = senders
+	}
+}
+
+func WithBatchSize(size int) MailOption {
+	return func(w *MailWorker) {
+		w.batchSize = size
+	}
+}
+
+func WithBatchWait(wait time.Duration) MailOption {
+	return func(w *MailWorker) {
+		w.batchWait = wait
+	}
+}
+
+func WithSTMPHelper(helper SMTPHelper) MailOption {
+	return func(w *MailWorker) {
+		w.smtpHelper = helper
+	}
+}
+
+func (mw *MailWorker) SetSender(sender []config.Sender) {
+	mw.senders = sender
+}
+
+func (mw *MailWorker) SetBatchSize(size int) {
+	mw.batchSize = size
+}
+
+func (mw *MailWorker) SetBatchWait(wait time.Duration) {
+	mw.batchWait = wait
+}
+
+func (mw *MailWorker) SetSMTPHelper(helper SMTPHelper) {
+	mw.smtpHelper = helper
 }
 
 // Start launches the mail worker to begin listening on the Queue channel
@@ -81,14 +147,50 @@ func (mw *MailWorker) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case ms := <-mw.queue:
-			go func(ctx context.Context, ms []Mail) {
-				dialer, err := ms[0].GetDialer()
-				if err != nil {
-					errorMail(err, ms)
-					return
+			var dialerArr []SMTPEntry
+			if len(mw.senders) > 0 {
+				for _, senderConf := range mw.senders {
+					dialer, err := mw.smtpHelper.GetDialerBySender(senderConf)
+					if err != nil {
+						log.Error(err)
+						continue
+					}
+					sender, err := dialHost(ctx, dialer)
+					if err != nil {
+						log.Error(err)
+						continue
+					}
+					sender.Close()
+					smtpFrom, err := mw.smtpHelper.GetSmtpFrom(senderConf)
+					if err != nil {
+						log.Error(err)
+						continue
+					}
+					dialerArr = append(dialerArr, SMTPEntry{dialer: dialer, from: smtpFrom})
 				}
-				sendMail(ctx, dialer, ms)
-			}(ctx, ms)
+			}
+			if len(dialerArr) > 0 {
+				// 开启配置：使用配置中提供的所有邮箱分组发送
+				go func(ctx context.Context, ms []Mail) {
+					mw.sendMailMultiSender(ctx, dialerArr, ms)
+				}(ctx, ms)
+			} else {
+				// 原逻辑：一次演练任务使用配置的一个邮箱发送
+				go func(ctx context.Context, ms []Mail) {
+					dialer, err := ms[0].GetDialer()
+					if err != nil {
+						errorMail(err, ms)
+						return
+					}
+					smtpFrom, err := ms[0].GetSmtpFrom()
+					if err != nil {
+						errorMail(err, ms)
+						return
+					}
+					mw.sendMail(ctx, dialer, smtpFrom, ms)
+				}(ctx, ms)
+			}
+
 		}
 	}
 }
@@ -135,10 +237,56 @@ func dialHost(ctx context.Context, dialer Dialer) (Sender, error) {
 	return sender, err
 }
 
+func splitMail(ms []Mail, n int, min int) [][]Mail {
+	groups := make([][]Mail, 0)
+	length := len(ms)
+	// 总数小于单组最小数量，只需要一组
+	if length < min {
+		return [][]Mail{ms}
+	}
+	// 总数小于所有组最小数量的和，优先放满前面的组
+	if length < n*min {
+		index := 0
+		for i := 0; i < n; i++ {
+			if index >= length {
+				break
+			}
+			if index+min >= length {
+				groups = append(groups, ms[index:])
+				break
+			}
+			groups = append(groups, ms[index:index+min])
+			index += min
+		}
+		return groups
+	}
+	// 平均分到各组
+	batchSize := length / n
+	start := 0
+	for i := 1; i <= n; i++ {
+		if i != n {
+			groups = append(groups, ms[start:start+batchSize])
+			start += batchSize
+		} else {
+			groups = append(groups, ms[start:])
+		}
+	}
+	return groups
+}
+
+// 使用多个邮箱进行分组发送
+func (mw *MailWorker) sendMailMultiSender(ctx context.Context, senders []SMTPEntry, ms []Mail) {
+	mailGroup := splitMail(ms, len(senders), 10)
+	for i, _ := range mailGroup {
+		go mw.sendMail(ctx, senders[i].dialer, senders[i].from, mailGroup[i])
+	}
+}
+
 // sendMail attempts to send the provided Mail instances.
 // If the context is cancelled before all of the mail are sent,
 // sendMail just returns and does not modify those emails.
-func sendMail(ctx context.Context, dialer Dialer, ms []Mail) {
+// 每发送batchSize条邮件，休眠wait
+func (mw *MailWorker) sendMail(ctx context.Context, dialer Dialer, smtpFrom string, ms []Mail) {
 	sender, err := dialHost(ctx, dialer)
 	if err != nil {
 		log.Warn(err)
@@ -147,6 +295,7 @@ func sendMail(ctx context.Context, dialer Dialer, ms []Mail) {
 	}
 	defer sender.Close()
 	message := gomail.NewMessage()
+	currentSize := 0
 	for i, m := range ms {
 		select {
 		case <-ctx.Done():
@@ -154,6 +303,11 @@ func sendMail(ctx context.Context, dialer Dialer, ms []Mail) {
 		default:
 			break
 		}
+		if mw.batchSize > 0 && currentSize >= mw.batchSize {
+			time.Sleep(mw.batchWait)
+			currentSize = 0
+		}
+		currentSize++
 		message.Reset()
 		err = m.Generate(message)
 		if err != nil {
@@ -161,14 +315,7 @@ func sendMail(ctx context.Context, dialer Dialer, ms []Mail) {
 			m.Error(err)
 			continue
 		}
-
-		smtp_from, err := m.GetSmtpFrom()
-		if err != nil {
-			m.Error(err)
-			continue
-		}
-
-		err = gomail.SendCustomFrom(sender, smtp_from, message)
+		err = gomail.SendCustomFrom(sender, smtpFrom, message)
 		if err != nil {
 			if te, ok := err.(*textproto.Error); ok {
 				switch {
@@ -223,7 +370,7 @@ func sendMail(ctx context.Context, dialer Dialer, ms []Mail) {
 			}
 		}
 		log.WithFields(logrus.Fields{
-			"smtp_from":     smtp_from,
+			"smtp_from":     smtpFrom,
 			"envelope_from": message.GetHeader("From")[0],
 			"email":         message.GetHeader("To")[0],
 		}).Info("Email sent")

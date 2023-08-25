@@ -12,6 +12,23 @@
 		"cert_path": "example.crt",
 		"key_path": "example.key"
 	},
+	"mail": {
+		"batch_size": 10,
+		"batch_wait": 5,
+		"user_sender": false,
+		"senders": [
+			{
+				"host": "smtp.163.com:465",
+				"username": "dyxx@163.com",
+				"password": ""
+			},
+			{
+				"host": "smtp.163.com:465",
+				"username": "dyyy@163.com",
+				"password": ""
+			}
+		]
+	},
 	"db_name": "sqlite3",
 	"db_path": "gophish.db",
 	"migrations_prefix": "db/db_",
